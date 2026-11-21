@@ -1,4 +1,4 @@
--- سكربت متعدد القوائم مع كشف الماب التلقائي، قود مود، ESP، وقسم 99 ليلة (نسخة عربية مطورة)
+-- سكربت متعدد القوائم مع كشف الماب التلقائي، قود مود، ESP، انتقال للاعبين، وقسم 99 ليلة
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
@@ -24,19 +24,53 @@ local Config = {
 	NoClipEnabled = false,
 	NightBoostEnabled = false,
 	SelectedMap = "Auto", -- "Auto", "99 Nights", "Universal"
+	FontIndex = 1,
 }
 
--- إعداد الخط العربي للمنيو (عدّله هنا ليتغير في كل الواجهة)
-local ARABIC_FONT = Enum.Font.Cartoon
+-- قائمة خطوط مختلفة لتغيير شكل النص في المنيو (عدّل الترتيب أو أضف خطوطاً حسب رغبتك)
+local FONT_CHOICES = {
+	Enum.Font.Arcade,
+	Enum.Font.Highway,
+	Enum.Font.Bangers,
+	Enum.Font.Code,
+	Enum.Font.SourceSansItalic,
+}
 
-local function applyArabicFont(instanceObj, size, alignRight)
+local function getCurrentFont()
+	return FONT_CHOICES[Config.FontIndex] or Enum.Font.Arcade
+end
+
+local StyledObjects = {}
+
+local function applyFontToObject(instanceObj, size, alignRight)
 	if instanceObj:IsA("TextLabel") or instanceObj:IsA("TextButton") or instanceObj:IsA("TextBox") then
-		instanceObj.Font = ARABIC_FONT
+		instanceObj.Font = getCurrentFont()
 		if size then
 			instanceObj.TextSize = size
 		end
 		if alignRight ~= nil then
 			instanceObj.TextXAlignment = alignRight and Enum.TextXAlignment.Right or Enum.TextXAlignment.Center
+		end
+		table.insert(StyledObjects, {
+			Obj = instanceObj,
+			Size = size or instanceObj.TextSize,
+			AlignRight = alignRight,
+		})
+	end
+end
+
+local function refreshAllFonts()
+	local chosenFont = getCurrentFont()
+	for _, entry in ipairs(StyledObjects) do
+		local obj = entry.Obj
+		if obj and obj.Parent then
+			obj.Font = chosenFont
+			if entry.Size then
+				obj.TextSize = entry.Size
+			end
+			if entry.AlignRight ~= nil then
+				obj.TextXAlignment = entry.AlignRight and Enum.TextXAlignment.Right or Enum.TextXAlignment.Center
+			end
 		end
 	end
 end
@@ -201,7 +235,7 @@ local function createPlayerEsp(player)
 	lbl.Text = player.DisplayName .. " (@" .. player.Name .. ")"
 	lbl.TextColor3 = Color3.fromRGB(255, 255, 255)
 	lbl.TextStrokeTransparency = 0.15
-	applyArabicFont(lbl, 12, false)
+	applyFontToObject(lbl, 12, false)
 	lbl.Parent = bb
 end
 
@@ -213,6 +247,54 @@ local function refreshEsp()
 			createPlayerEsp(plr)
 		end
 	end
+end
+
+-- انتقال للاعب بالاسم أو لأقرب لاعب
+local function teleportToPlayerByName(partialName)
+	local myRoot = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+	if not myRoot or not partialName or partialName == "" then return false, "اكتب اسم اللاعب أولاً" end
+
+	local query = string.lower(partialName)
+	for _, plr in ipairs(Players:GetPlayers()) do
+		if plr ~= LocalPlayer then
+			local nMatch = string.find(string.lower(plr.Name), query, 1, true)
+			local dMatch = string.find(string.lower(plr.DisplayName), query, 1, true)
+			if nMatch or dMatch then
+				local targetRoot = plr.Character and plr.Character:FindFirstChild("HumanoidRootPart")
+				if targetRoot then
+					myRoot.CFrame = targetRoot.CFrame * CFrame.new(0, 0, -3.5)
+					return true, "تم الانتقال إلى: " .. plr.Name
+				end
+			end
+		end
+	end
+	return false, "لم يتم العثور على لاعب بهذا الاسم"
+end
+
+local function teleportToNearestPlayer()
+	local myRoot = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+	if not myRoot then return false, "الشخصية غير جاهزة" end
+
+	local nearestRoot, nearestName, bestDist = nil, nil, math.huge
+	for _, plr in ipairs(Players:GetPlayers()) do
+		if plr ~= LocalPlayer and plr.Character then
+			local tRoot = plr.Character:FindFirstChild("HumanoidRootPart")
+			if tRoot then
+				local d = (tRoot.Position - myRoot.Position).Magnitude
+				if d < bestDist then
+					bestDist = d
+					nearestRoot = tRoot
+					nearestName = plr.Name
+				end
+			end
+		end
+	end
+
+	if nearestRoot then
+		myRoot.CFrame = nearestRoot.CFrame * CFrame.new(0, 0, -3.5)
+		return true, "تم الانتقال لأقرب لاعب: " .. tostring(nearestName)
+	end
+	return false, "لا يوجد لاعبون آخرون في الماب"
 end
 
 -- مراقبة ظهور الشخصيات واللاعبين
@@ -324,8 +406,9 @@ local function detectCurrentMap()
 	return "Universal"
 end
 
--- بناء واجهة منيو عربية قوية بخط مميز
+-- بناء واجهة منيو عربية قوية بخط مختلف وانتقال للاعبين
 local function buildHub()
+	table.clear(StyledObjects)
 	local parentGui = (gethui and gethui()) or LocalPlayer:WaitForChild("PlayerGui")
 	local old = parentGui:FindFirstChild("MultiMapHubGui")
 	if old then old:Destroy() end
@@ -336,8 +419,8 @@ local function buildHub()
 	gui.Parent = parentGui
 
 	local main = Instance.new("Frame")
-	main.Size = UDim2.new(0, 385, 0, 295)
-	main.Position = UDim2.new(0.5, -192, 0.5, -147)
+	main.Size = UDim2.new(0, 390, 0, 315)
+	main.Position = UDim2.new(0.5, -195, 0.5, -157)
 	main.BackgroundColor3 = Color3.fromRGB(16, 18, 25)
 	main.BorderSizePixel = 0
 	main.Active = true
@@ -357,7 +440,7 @@ local function buildHub()
 	header.BackgroundTransparency = 1
 	header.Text = "منيو القوائم الشامل | الماب: " .. detectCurrentMap()
 	header.TextColor3 = Color3.fromRGB(248, 250, 252)
-	applyArabicFont(header, 13, true)
+	applyFontToObject(header, 13, true)
 	header.Parent = main
 
 	local minBtn = Instance.new("TextButton")
@@ -366,7 +449,7 @@ local function buildHub()
 	minBtn.BackgroundColor3 = Color3.fromRGB(38, 43, 58)
 	minBtn.Text = "-"
 	minBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-	applyArabicFont(minBtn, 16, false)
+	applyFontToObject(minBtn, 16, false)
 	minBtn.Parent = main
 	Instance.new("UICorner", minBtn).CornerRadius = UDim.new(0, 7)
 
@@ -390,10 +473,10 @@ local function buildHub()
 		tabBar.Visible = not minimized
 		contentArea.Visible = not minimized
 		minBtn.Text = minimized and "+" or "-"
-		main.Size = minimized and UDim2.new(0, 385, 0, 42) or UDim2.new(0, 385, 0, 295)
+		main.Size = minimized and UDim2.new(0, 390, 0, 42) or UDim2.new(0, 390, 0, 315)
 	end)
 
-	local tabs = { "عام", "حماية/ESP", "99 ليلة", "المابات" }
+	local tabs = { "عام", "لاعبين/ESP", "99 ليلة", "المابات" }
 	local pages = {}
 	local tabButtons = {}
 
@@ -413,7 +496,7 @@ local function buildHub()
 		page.Position = UDim2.new(0, 6, 0, 6)
 		page.BackgroundTransparency = 1
 		page.ScrollBarThickness = 4
-		page.CanvasSize = UDim2.new(0, 0, 0, 390)
+		page.CanvasSize = UDim2.new(0, 0, 0, 430)
 		page.Visible = (i == 1)
 		page.Parent = contentArea
 
@@ -429,7 +512,7 @@ local function buildHub()
 		tabBtn.BackgroundColor3 = (i == 1) and Color3.fromRGB(59, 130, 246) or Color3.fromRGB(37, 42, 56)
 		tabBtn.Text = tabName
 		tabBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-		applyArabicFont(tabBtn, 12, false)
+		applyFontToObject(tabBtn, 12, false)
 		tabBtn.Parent = tabBar
 		Instance.new("UICorner", tabBtn).CornerRadius = UDim.new(0, 7)
 
@@ -445,7 +528,7 @@ local function buildHub()
 		btn.BackgroundColor3 = bgColor or Color3.fromRGB(43, 49, 66)
 		btn.Text = labelText
 		btn.TextColor3 = Color3.fromRGB(255, 255, 255)
-		applyArabicFont(btn, 13, false)
+		applyFontToObject(btn, 13, false)
 		btn.Parent = parentPage
 		Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 7)
 		btn.MouseButton1Click:Connect(function()
@@ -462,7 +545,7 @@ local function buildHub()
 		box.PlaceholderText = placeholderText
 		box.TextColor3 = Color3.fromRGB(255, 255, 255)
 		box.PlaceholderColor3 = Color3.fromRGB(150, 158, 175)
-		applyArabicFont(box, 12, true)
+		applyFontToObject(box, 12, true)
 		box.Parent = parentPage
 		Instance.new("UICorner", box).CornerRadius = UDim.new(0, 7)
 		return box
@@ -500,6 +583,12 @@ local function buildHub()
 		btn.Text = Config.NoClipEnabled and "اختراق الجدران NoClip: مفعل" or "اختراق الجدران NoClip: معطل"
 	end)
 
+	addActionButton(pages["عام"], "تغيير خط المنيو (" .. tostring(getCurrentFont().Name) .. ")", Color3.fromRGB(109, 40, 217), function(btn)
+		Config.FontIndex = (Config.FontIndex % #FONT_CHOICES) + 1
+		refreshAllFonts()
+		btn.Text = "تغيير خط المنيو (" .. tostring(getCurrentFont().Name) .. ")"
+	end)
+
 	addActionButton(pages["عام"], "إعادة ضبط الحركة (16 / 50)", Color3.fromRGB(153, 27, 27), function()
 		Config.WalkSpeed = 16
 		Config.JumpPower = 50
@@ -508,13 +597,25 @@ local function buildHub()
 		applyMovement(LocalPlayer.Character)
 	end)
 
-	-- === تبويب حماية/ESP ===
-	addActionButton(pages["حماية/ESP"], "تبديل قود مود (God Mode)", Color3.fromRGB(22, 163, 74), function(btn)
+	-- === تبويب لاعبين/ESP ===
+	local targetPlayerBox = addInputBox(pages["لاعبين/ESP"], "اكتب اسم اللاعب للانتقال إليه", "")
+
+	addActionButton(pages["لاعبين/ESP"], "الانتقال إلى اللاعب المكتوب", Color3.fromRGB(37, 99, 235), function()
+		local ok, msg = teleportToPlayerByName(targetPlayerBox.Text)
+		print(msg)
+	end)
+
+	addActionButton(pages["لاعبين/ESP"], "الانتقال إلى أقرب لاعب في الماب", Color3.fromRGB(14, 165, 233), function()
+		local ok, msg = teleportToNearestPlayer()
+		print(msg)
+	end)
+
+	addActionButton(pages["لاعبين/ESP"], "تبديل قود مود (God Mode)", Color3.fromRGB(22, 163, 74), function(btn)
 		setGodMode(not Config.GodMode)
 		btn.Text = Config.GodMode and "قود مود: مفعل" or "قود مود: معطل"
 	end)
 
-	addActionButton(pages["حماية/ESP"], "تبديل ESP للاعبين", Color3.fromRGB(220, 38, 38), function(btn)
+	addActionButton(pages["لاعبين/ESP"], "تبديل ESP للاعبين", Color3.fromRGB(220, 38, 38), function(btn)
 		Config.EspEnabled = not Config.EspEnabled
 		refreshEsp()
 		btn.Text = Config.EspEnabled and "ESP اللاعبين: مفعل" or "ESP اللاعبين: معطل"
