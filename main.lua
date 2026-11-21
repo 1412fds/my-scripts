@@ -1,25 +1,45 @@
--- سكربت متعدد القوائم مع كشف الماب التلقائي، قود مود، ESP، وقسم 99 ليلة
+-- سكربت متعدد القوائم مع كشف الماب التلقائي، قود مود، ESP، وقسم 99 ليلة (نسخة عربية مطورة)
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 local Lighting = game:GetService("Lighting")
+local UserInputService = game:GetService("UserInputService")
 
 local LocalPlayer = Players.LocalPlayer
 
 -- معرفات مابات كمثال (استبدل/أضف PlaceId المابات التي تريدها)
 local MAP_IDS = {
-	NIGHTS_99 = 79546208627805, -- مثال: ضع PlaceId الصحيح لماب 99 ليلة إذا اختلف
+	NIGHTS_99 = 79546208627805, -- ضع PlaceId الصحيح لماب 99 ليلة إذا اختلف
 }
 
 -- إعدادات الحالة العامة
 local Config = {
-	WalkSpeed = 16,
-	JumpPower = 50,
+	WalkSpeed = 28,
+	JumpPower = 80,
+	FlySpeed = 60,
 	LockStats = false,
 	GodMode = false,
 	EspEnabled = false,
+	FlyEnabled = false,
+	NoClipEnabled = false,
+	NightBoostEnabled = false,
 	SelectedMap = "Auto", -- "Auto", "99 Nights", "Universal"
 }
+
+-- إعداد الخط العربي للمنيو (عدّله هنا ليتغير في كل الواجهة)
+local ARABIC_FONT = Enum.Font.Cartoon
+
+local function applyArabicFont(instanceObj, size, alignRight)
+	if instanceObj:IsA("TextLabel") or instanceObj:IsA("TextButton") or instanceObj:IsA("TextBox") then
+		instanceObj.Font = ARABIC_FONT
+		if size then
+			instanceObj.TextSize = size
+		end
+		if alignRight ~= nil then
+			instanceObj.TextXAlignment = alignRight and Enum.TextXAlignment.Right or Enum.TextXAlignment.Center
+		end
+	end
+end
 
 local Connections = {}
 local EspFolder = Instance.new("Folder")
@@ -38,7 +58,8 @@ end
 
 -- تطبيق خصائص الحركة على الشخصية
 local function applyMovement(char)
-	local humanoid = char and char:FindFirstChildOfClass("Humanoid")
+	local targetChar = char or LocalPlayer.Character
+	local humanoid = targetChar and targetChar:FindFirstChildOfClass("Humanoid")
 	if not humanoid then return end
 
 	humanoid.WalkSpeed = Config.WalkSpeed
@@ -75,6 +96,69 @@ local function setGodMode(enabled)
 	end
 end
 
+-- طيران (Fly) واختراق الجدران (NoClip)
+local flyVel, flyGyro
+local function stopFly()
+	Config.FlyEnabled = false
+	if flyVel then flyVel:Destroy() flyVel = nil end
+	if flyGyro then flyGyro:Destroy() flyGyro = nil end
+	local hum = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+	if hum then hum.PlatformStand = false end
+end
+
+local function startFly()
+	local char = LocalPlayer.Character
+	local root = char and char:FindFirstChild("HumanoidRootPart")
+	local hum = char and char:FindFirstChildOfClass("Humanoid")
+	if not root or not hum then return end
+
+	stopFly()
+	Config.FlyEnabled = true
+	hum.PlatformStand = true
+
+	flyVel = Instance.new("BodyVelocity")
+	flyVel.MaxForce = Vector3.new(1e5, 1e5, 1e5)
+	flyVel.Velocity = Vector3.zero
+	flyVel.Parent = root
+
+	flyGyro = Instance.new("BodyGyro")
+	flyGyro.MaxTorque = Vector3.new(1e5, 1e5, 1e5)
+	flyGyro.P = 3000
+	flyGyro.CFrame = root.CFrame
+	flyGyro.Parent = root
+end
+
+table.insert(Connections, RunService.RenderStepped:Connect(function()
+	if Config.FlyEnabled then
+		local char = LocalPlayer.Character
+		local root = char and char:FindFirstChild("HumanoidRootPart")
+		local cam = Workspace.CurrentCamera
+		if root and cam and flyVel and flyGyro then
+			local dir = Vector3.zero
+			if UserInputService:IsKeyDown(Enum.KeyCode.W) then dir += cam.CFrame.LookVector end
+			if UserInputService:IsKeyDown(Enum.KeyCode.S) then dir -= cam.CFrame.LookVector end
+			if UserInputService:IsKeyDown(Enum.KeyCode.D) then dir += cam.CFrame.RightVector end
+			if UserInputService:IsKeyDown(Enum.KeyCode.A) then dir -= cam.CFrame.RightVector end
+			if UserInputService:IsKeyDown(Enum.KeyCode.Space) then dir += Vector3.new(0, 1, 0) end
+			if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) then dir -= Vector3.new(0, 1, 0) end
+
+			if dir.Magnitude > 0 then
+				dir = dir.Unit * Config.FlySpeed
+			end
+			flyVel.Velocity = dir
+			flyGyro.CFrame = cam.CFrame
+		end
+	end
+
+	if Config.NoClipEnabled and LocalPlayer.Character then
+		for _, part in ipairs(LocalPlayer.Character:GetDescendants()) do
+			if part:IsA("BasePart") then
+				part.CanCollide = false
+			end
+		end
+	end
+end))
+
 -- نظام ESP بسيط ونظيف للاعبين
 local function clearEsp()
 	for _, item in ipairs(EspFolder:GetChildren()) do
@@ -85,20 +169,40 @@ end
 local function createPlayerEsp(player)
 	if player == LocalPlayer or not Config.EspEnabled then return end
 	local char = player.Character
-	if not char or not char.Parent then return end
+	local head = char and char:FindFirstChild("Head")
+	if not char or not char.Parent or not head then return end
 
 	if EspFolder:FindFirstChild(player.Name) then
 		EspFolder[player.Name]:Destroy()
 	end
 
+	local holder = Instance.new("Folder")
+	holder.Name = player.Name
+	holder.Parent = EspFolder
+
 	local highlight = Instance.new("Highlight")
-	highlight.Name = player.Name
 	highlight.Adornee = char
 	highlight.FillColor = Color3.fromRGB(239, 68, 68)
 	highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
-	highlight.FillTransparency = 0.55
+	highlight.FillTransparency = 0.52
 	highlight.OutlineTransparency = 0
-	highlight.Parent = EspFolder
+	highlight.Parent = holder
+
+	local bb = Instance.new("BillboardGui")
+	bb.Adornee = head
+	bb.Size = UDim2.new(0, 150, 0, 26)
+	bb.StudsOffset = Vector3.new(0, 2.3, 0)
+	bb.AlwaysOnTop = true
+	bb.Parent = holder
+
+	local lbl = Instance.new("TextLabel")
+	lbl.Size = UDim2.new(1, 0, 1, 0)
+	lbl.BackgroundTransparency = 1
+	lbl.Text = player.DisplayName .. " (@" .. player.Name .. ")"
+	lbl.TextColor3 = Color3.fromRGB(255, 255, 255)
+	lbl.TextStrokeTransparency = 0.15
+	applyArabicFont(lbl, 12, false)
+	lbl.Parent = bb
 end
 
 local function refreshEsp()
@@ -120,6 +224,9 @@ table.insert(Connections, LocalPlayer.CharacterAdded:Connect(function(char)
 	if Config.GodMode then
 		setGodMode(true)
 	end
+	if Config.FlyEnabled then
+		startFly()
+	end
 end))
 
 table.insert(Connections, Players.PlayerAdded:Connect(function(plr)
@@ -140,15 +247,70 @@ end))
 
 -- أدوات مخصصة لماب 99 ليلة (أمثلة قابلة للتوسيع)
 local function boostNightVisibility(enable)
+	Config.NightBoostEnabled = enable
 	if enable then
-		Lighting.Ambient = Color3.fromRGB(160, 160, 175)
-		Lighting.OutdoorAmbient = Color3.fromRGB(160, 160, 175)
-		Lighting.Brightness = 2.2
+		Lighting.Ambient = Color3.fromRGB(165, 165, 180)
+		Lighting.OutdoorAmbient = Color3.fromRGB(165, 165, 180)
+		Lighting.Brightness = 2.4
+		Lighting.FogEnd = 100000
 	else
 		Lighting.Ambient = Color3.fromRGB(70, 70, 70)
 		Lighting.OutdoorAmbient = Color3.fromRGB(128, 128, 128)
 		Lighting.Brightness = 1
+		Lighting.FogEnd = 1000
 	end
+end
+
+local function tpToNearestItem(keyword)
+	local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+	if not root or not keyword or keyword == "" then return false end
+	local query = string.lower(keyword)
+	local bestCF, bestDist = nil, math.huge
+
+	for _, obj in ipairs(Workspace:GetDescendants()) do
+		if string.find(string.lower(obj.Name), query, 1, true) then
+			local cf = obj:IsA("BasePart") and obj.CFrame or (obj:IsA("Model") and obj:GetPivot() or nil)
+			if cf then
+				local dist = (cf.Position - root.Position).Magnitude
+				if dist < bestDist then
+					bestDist = dist
+					bestCF = cf
+				end
+			end
+		end
+	end
+
+	if bestCF then
+		root.CFrame = bestCF + Vector3.new(0, 4, 0)
+		return true
+	end
+	return false
+end
+
+local function bringMatchedItems(keyword)
+	local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+	if not root or not keyword or keyword == "" then return 0 end
+	local query = string.lower(keyword)
+	local moved = 0
+
+	for _, obj in ipairs(Workspace:GetDescendants()) do
+		if string.find(string.lower(obj.Name), query, 1, true) then
+			local ok = pcall(function()
+				local target = root.CFrame * CFrame.new(0, 0, -4 - (moved * 1.5))
+				if obj:IsA("BasePart") and not obj.Anchored then
+					obj.CFrame = target
+					moved += 1
+				elseif obj:IsA("Model") then
+					obj:PivotTo(target)
+					moved += 1
+				end
+			end)
+			if ok and moved >= 5 then
+				break
+			end
+		end
+	end
+	return moved
 end
 
 -- تحديد الماب الحالي تلقائياً أو حسب الاختيار
@@ -162,7 +324,7 @@ local function detectCurrentMap()
 	return "Universal"
 end
 
--- بناء واجهة مبسطة بتبويبات (عام / ESP / قود مود / 99 ليلة / المابات)
+-- بناء واجهة منيو عربية قوية بخط مميز
 local function buildHub()
 	local parentGui = (gethui and gethui()) or LocalPlayer:WaitForChild("PlayerGui")
 	local old = parentGui:FindFirstChild("MultiMapHubGui")
@@ -174,42 +336,75 @@ local function buildHub()
 	gui.Parent = parentGui
 
 	local main = Instance.new("Frame")
-	main.Size = UDim2.new(0, 360, 0, 260)
-	main.Position = UDim2.new(0.5, -180, 0.5, -130)
-	main.BackgroundColor3 = Color3.fromRGB(20, 22, 29)
+	main.Size = UDim2.new(0, 385, 0, 295)
+	main.Position = UDim2.new(0.5, -192, 0.5, -147)
+	main.BackgroundColor3 = Color3.fromRGB(16, 18, 25)
 	main.BorderSizePixel = 0
 	main.Active = true
 	main.Draggable = true
 	main.Parent = gui
-	Instance.new("UICorner", main).CornerRadius = UDim.new(0, 10)
+	Instance.new("UICorner", main).CornerRadius = UDim.new(0, 12)
+
+	local stroke = Instance.new("UIStroke")
+	stroke.Color = Color3.fromRGB(59, 130, 246)
+	stroke.Thickness = 1.4
+	stroke.Transparency = 0.35
+	stroke.Parent = main
 
 	local header = Instance.new("TextLabel")
-	header.Size = UDim2.new(1, -16, 0, 32)
-	header.Position = UDim2.new(0, 10, 0, 4)
+	header.Size = UDim2.new(1, -46, 0, 34)
+	header.Position = UDim2.new(0, 10, 0, 3)
 	header.BackgroundTransparency = 1
-	header.Text = "Hub متعدد القوائم | الماب الحالي: " .. detectCurrentMap()
-	header.TextColor3 = Color3.fromRGB(240, 244, 248)
-	header.TextSize = 13
-	header.Font = Enum.Font.GothamBold
-	header.TextXAlignment = Enum.TextXAlignment.Left
+	header.Text = "منيو القوائم الشامل | الماب: " .. detectCurrentMap()
+	header.TextColor3 = Color3.fromRGB(248, 250, 252)
+	applyArabicFont(header, 13, true)
 	header.Parent = main
 
+	local minBtn = Instance.new("TextButton")
+	minBtn.Size = UDim2.new(0, 28, 0, 26)
+	minBtn.Position = UDim2.new(0, 8, 0, 7)
+	minBtn.BackgroundColor3 = Color3.fromRGB(38, 43, 58)
+	minBtn.Text = "-"
+	minBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+	applyArabicFont(minBtn, 16, false)
+	minBtn.Parent = main
+	Instance.new("UICorner", minBtn).CornerRadius = UDim.new(0, 7)
+
 	local tabBar = Instance.new("Frame")
-	tabBar.Size = UDim2.new(1, -16, 0, 28)
-	tabBar.Position = UDim2.new(0, 8, 0, 38)
+	tabBar.Size = UDim2.new(1, -16, 0, 30)
+	tabBar.Position = UDim2.new(0, 8, 0, 40)
 	tabBar.BackgroundTransparency = 1
 	tabBar.Parent = main
 
 	local contentArea = Instance.new("Frame")
-	contentArea.Size = UDim2.new(1, -16, 1, -76)
-	contentArea.Position = UDim2.new(0, 8, 0, 70)
-	contentArea.BackgroundColor3 = Color3.fromRGB(28, 31, 40)
+	contentArea.Size = UDim2.new(1, -16, 1, -78)
+	contentArea.Position = UDim2.new(0, 8, 0, 74)
+	contentArea.BackgroundColor3 = Color3.fromRGB(24, 27, 37)
 	contentArea.BorderSizePixel = 0
 	contentArea.Parent = main
-	Instance.new("UICorner", contentArea).CornerRadius = UDim.new(0, 8)
+	Instance.new("UICorner", contentArea).CornerRadius = UDim.new(0, 10)
+
+	local minimized = false
+	minBtn.MouseButton1Click:Connect(function()
+		minimized = not minimized
+		tabBar.Visible = not minimized
+		contentArea.Visible = not minimized
+		minBtn.Text = minimized and "+" or "-"
+		main.Size = minimized and UDim2.new(0, 385, 0, 42) or UDim2.new(0, 385, 0, 295)
+	end)
 
 	local tabs = { "عام", "حماية/ESP", "99 ليلة", "المابات" }
 	local pages = {}
+	local tabButtons = {}
+
+	local function openTab(targetName)
+		for name, p in pairs(pages) do
+			p.Visible = (name == targetName)
+		end
+		for name, b in pairs(tabButtons) do
+			b.BackgroundColor3 = (name == targetName) and Color3.fromRGB(59, 130, 246) or Color3.fromRGB(37, 42, 56)
+		end
+	end
 
 	for i, tabName in ipairs(tabs) do
 		local page = Instance.new("ScrollingFrame")
@@ -218,6 +413,7 @@ local function buildHub()
 		page.Position = UDim2.new(0, 6, 0, 6)
 		page.BackgroundTransparency = 1
 		page.ScrollBarThickness = 4
+		page.CanvasSize = UDim2.new(0, 0, 0, 390)
 		page.Visible = (i == 1)
 		page.Parent = contentArea
 
@@ -230,99 +426,139 @@ local function buildHub()
 		local tabBtn = Instance.new("TextButton")
 		tabBtn.Size = UDim2.new(1 / #tabs, -4, 1, 0)
 		tabBtn.Position = UDim2.new((i - 1) / #tabs, 2, 0, 0)
-		tabBtn.BackgroundColor3 = (i == 1) and Color3.fromRGB(59, 130, 246) or Color3.fromRGB(40, 44, 56)
+		tabBtn.BackgroundColor3 = (i == 1) and Color3.fromRGB(59, 130, 246) or Color3.fromRGB(37, 42, 56)
 		tabBtn.Text = tabName
 		tabBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-		tabBtn.TextSize = 11
-		tabBtn.Font = Enum.Font.GothamBold
+		applyArabicFont(tabBtn, 12, false)
 		tabBtn.Parent = tabBar
-		Instance.new("UICorner", tabBtn).CornerRadius = UDim.new(0, 6)
+		Instance.new("UICorner", tabBtn).CornerRadius = UDim.new(0, 7)
 
+		tabButtons[tabName] = tabBtn
 		tabBtn.MouseButton1Click:Connect(function()
-			for name, p in pairs(pages) do
-				p.Visible = (name == tabName)
-			end
-			for _, child in ipairs(tabBar:GetChildren()) do
-				if child:IsA("TextButton") then
-					child.BackgroundColor3 = (child.Text == tabName) and Color3.fromRGB(59, 130, 246) or Color3.fromRGB(40, 44, 56)
-				end
-			end
+			openTab(tabName)
 		end)
 	end
 
-	local function addActionButton(parentPage, labelText, onClick)
+	local function addActionButton(parentPage, labelText, bgColor, onClick)
 		local btn = Instance.new("TextButton")
-		btn.Size = UDim2.new(1, 0, 0, 32)
-		btn.BackgroundColor3 = Color3.fromRGB(45, 50, 65)
+		btn.Size = UDim2.new(1, 0, 0, 33)
+		btn.BackgroundColor3 = bgColor or Color3.fromRGB(43, 49, 66)
 		btn.Text = labelText
 		btn.TextColor3 = Color3.fromRGB(255, 255, 255)
-		btn.TextSize = 12
-		btn.Font = Enum.Font.GothamBold
+		applyArabicFont(btn, 13, false)
 		btn.Parent = parentPage
-		Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
+		Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 7)
 		btn.MouseButton1Click:Connect(function()
 			onClick(btn)
 		end)
 		return btn
 	end
 
-	-- تبويب عام
-	addActionButton(pages["عام"], "زيادة السرعة (32)", function()
-		Config.WalkSpeed = 32
+	local function addInputBox(parentPage, placeholderText, defaultVal)
+		local box = Instance.new("TextBox")
+		box.Size = UDim2.new(1, 0, 0, 32)
+		box.BackgroundColor3 = Color3.fromRGB(33, 37, 50)
+		box.Text = defaultVal or ""
+		box.PlaceholderText = placeholderText
+		box.TextColor3 = Color3.fromRGB(255, 255, 255)
+		box.PlaceholderColor3 = Color3.fromRGB(150, 158, 175)
+		applyArabicFont(box, 12, true)
+		box.Parent = parentPage
+		Instance.new("UICorner", box).CornerRadius = UDim.new(0, 7)
+		return box
+	end
+
+	-- === تبويب عام ===
+	local speedInput = addInputBox(pages["عام"], "السرعة (مثال: 35)", tostring(Config.WalkSpeed))
+	local jumpInput = addInputBox(pages["عام"], "القفز (مثال: 95)", tostring(Config.JumpPower))
+
+	addActionButton(pages["عام"], "تطبيق السرعة والقفز", Color3.fromRGB(37, 99, 235), function()
+		local s = tonumber(speedInput.Text)
+		local j = tonumber(jumpInput.Text)
+		if s then Config.WalkSpeed = math.clamp(s, 0, 300) end
+		if j then Config.JumpPower = math.clamp(j, 0, 350) end
 		applyMovement(LocalPlayer.Character)
 	end)
 
-	addActionButton(pages["عام"], "زيادة القفز (90)", function()
-		Config.JumpPower = 90
-		applyMovement(LocalPlayer.Character)
+	addActionButton(pages["عام"], "قفل الحركة بعد الموت: معطل", nil, function(btn)
+		Config.LockStats = not Config.LockStats
+		btn.Text = Config.LockStats and "قفل الحركة بعد الموت: مفعل" or "قفل الحركة بعد الموت: معطل"
 	end)
 
-	addActionButton(pages["عام"], "إعادة ضبط الحركة (16 / 50)", function()
+	addActionButton(pages["عام"], "طيران (WASD + Space/Ctrl): معطل", nil, function(btn)
+		if Config.FlyEnabled then
+			stopFly()
+			btn.Text = "طيران (WASD + Space/Ctrl): معطل"
+		else
+			startFly()
+			btn.Text = "طيران (WASD + Space/Ctrl): مفعل"
+		end
+	end)
+
+	addActionButton(pages["عام"], "اختراق الجدران NoClip: معطل", nil, function(btn)
+		Config.NoClipEnabled = not Config.NoClipEnabled
+		btn.Text = Config.NoClipEnabled and "اختراق الجدران NoClip: مفعل" or "اختراق الجدران NoClip: معطل"
+	end)
+
+	addActionButton(pages["عام"], "إعادة ضبط الحركة (16 / 50)", Color3.fromRGB(153, 27, 27), function()
 		Config.WalkSpeed = 16
 		Config.JumpPower = 50
+		speedInput.Text = "16"
+		jumpInput.Text = "50"
 		applyMovement(LocalPlayer.Character)
 	end)
 
-	-- تبويب حماية/ESP
-	addActionButton(pages["حماية/ESP"], "تبديل قود مود (God Mode)", function(btn)
+	-- === تبويب حماية/ESP ===
+	addActionButton(pages["حماية/ESP"], "تبديل قود مود (God Mode)", Color3.fromRGB(22, 163, 74), function(btn)
 		setGodMode(not Config.GodMode)
 		btn.Text = Config.GodMode and "قود مود: مفعل" or "قود مود: معطل"
 	end)
 
-	addActionButton(pages["حماية/ESP"], "تبديل ESP للاعبين", function(btn)
+	addActionButton(pages["حماية/ESP"], "تبديل ESP للاعبين", Color3.fromRGB(220, 38, 38), function(btn)
 		Config.EspEnabled = not Config.EspEnabled
 		refreshEsp()
 		btn.Text = Config.EspEnabled and "ESP اللاعبين: مفعل" or "ESP اللاعبين: معطل"
 	end)
 
-	-- تبويب 99 ليلة
-	addActionButton(pages["99 ليلة"], "تبديل إضاءة الليل (Night Boost)", function(btn)
-		local active = btn.Text:find("مفعل") ~= nil
-		boostNightVisibility(not active)
-		btn.Text = (not active) and "إضاءة الليل: مفعل" or "إضاءة الليل: معطل"
+	-- === تبويب 99 ليلة ===
+	addActionButton(pages["99 ليلة"], "تبديل إضاءة الليل (Night Boost)", Color3.fromRGB(217, 119, 6), function(btn)
+		boostNightVisibility(not Config.NightBoostEnabled)
+		btn.Text = Config.NightBoostEnabled and "إضاءة الليل: مفعل" or "إضاءة الليل: معطل"
 	end)
 
-	-- تبويب المابات
-	addActionButton(pages["المابات"], "وضع تلقائي (Auto Detect)", function()
+	local itemInput = addInputBox(pages["99 ليلة"], "اكتب اسم عنصر/مورد (مثال: Log)", "")
+	addActionButton(pages["99 ليلة"], "الانتقال لأقرب عنصر مطابق", nil, function()
+		local ok = tpToNearestItem(itemInput.Text)
+		print(ok and "تم الانتقال للعنصر" or "لم يُعثر على عنصر مطابق")
+	end)
+
+	addActionButton(pages["99 ليلة"], "سحب عناصر مطابقة أمامك", nil, function()
+		local count = bringMatchedItems(itemInput.Text)
+		print("عدد العناصر التي تمت محاولة سحبها: " .. tostring(count))
+	end)
+
+	-- === تبويب المابات ===
+	addActionButton(pages["المابات"], "وضع تلقائي (Auto Detect)", nil, function()
 		Config.SelectedMap = "Auto"
-		header.Text = "Hub متعدد القوائم | الماب الحالي: " .. detectCurrentMap()
+		header.Text = "منيو القوائم الشامل | الماب: " .. detectCurrentMap()
+		openTab(game.PlaceId == MAP_IDS.NIGHTS_99 and "99 ليلة" or "عام")
 	end)
 
-	addActionButton(pages["المابات"], "فتح قائمة 99 ليلة يدوياً", function()
+	addActionButton(pages["المابات"], "فتح قائمة 99 ليلة يدوياً", nil, function()
 		Config.SelectedMap = "99 Nights"
-		header.Text = "Hub متعدد القوائم | الماب الحالي: 99 Nights"
-		for name, p in pairs(pages) do
-			p.Visible = (name == "99 ليلة")
-		end
+		header.Text = "منيو القوائم الشامل | الماب: 99 Nights"
+		openTab("99 ليلة")
 	end)
 
-	addActionButton(pages["المابات"], "فتح القائمة العامة يدوياً", function()
+	addActionButton(pages["المابات"], "فتح القائمة العامة يدوياً", nil, function()
 		Config.SelectedMap = "Universal"
-		header.Text = "Hub متعدد القوائم | الماب الحالي: Universal"
-		for name, p in pairs(pages) do
-			p.Visible = (name == "عام")
-		end
+		header.Text = "منيو القوائم الشامل | الماب: Universal"
+		openTab("عام")
 	end)
+
+	if detectCurrentMap() == "99 Nights" then
+		openTab("99 ليلة")
+	end
 end
 
 buildHub()
